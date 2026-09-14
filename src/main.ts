@@ -55,12 +55,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document);
 
-  // const port = configService.get<number>('port') ?? 3000;
-
   const port = parseInt(process.env.PORT || '3000', 10);
-  console.log('port in the main.ts', port);
 
   await app.listen(port, '0.0.0.0');
+  console.log(`Application is running on port ${port}`);
 }
 
 bootstrap();
