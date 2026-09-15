@@ -88,7 +88,7 @@ export class ReservationsService {
       throw new BadRequestException('Product is not reservable');
     }
 
-    const reservationPrice = product.reservationPrice ?? product.sellingPrice;
+    const reservationPrice = this.resolveProductUnitPrice(product);
     const totalAmount = multiplyDecimal(reservationPrice, dto.quantity);
 
     if (deposit.gt(totalAmount)) {
@@ -183,70 +183,89 @@ export class ReservationsService {
     }
 
     const remaining = reservation.totalAmount.sub(reservation.paidAmount);
+    const hasRemaining = remaining.gt(0);
 
-    if (remaining.gt(0) && !dto.method) {
-      throw new BadRequestException('Payment method is required');
+    if (hasRemaining) {
+      if (!dto.method) {
+        throw new BadRequestException(
+          'Payment method is required to collect the remaining balance',
+        );
+      }
+
+      if (
+        (dto.method === PaymentMethod.WALLET ||
+          dto.method === PaymentMethod.INSTAPAY) &&
+        !dto.proofReference?.trim()
+      ) {
+        throw new BadRequestException(
+          'Payment proof is required for wallet/Instapay remaining payment',
+        );
+      }
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const sale = await tx.sale.create({
-        data: {
-          studentId: reservation.studentId,
-          branchId: reservation.branchId,
-          createdById: user.id,
-          totalAmount: reservation.totalAmount,
-          reservationId: reservation.id,
-          items: {
-            create: {
-              productId: reservation.productId,
-              quantity: reservation.quantity,
-              unitPrice: reservation.reservationPrice,
-              unitCost: reservation.product.purchasePrice,
-              total: reservation.totalAmount,
+    const sale = await this.prisma.$transaction(
+      async (tx) => {
+        const createdSale = await tx.sale.create({
+          data: {
+            studentId: reservation.studentId,
+            branchId: reservation.branchId,
+            createdById: user.id,
+            totalAmount: reservation.totalAmount,
+            reservationId: reservation.id,
+            items: {
+              create: {
+                productId: reservation.productId,
+                quantity: reservation.quantity,
+                unitPrice: reservation.reservationPrice,
+                unitCost: reservation.product.purchasePrice,
+                total: reservation.totalAmount,
+              },
             },
-          },
-          payments:
-            remaining.gt(0)
+            payments: hasRemaining
               ? {
                   create: {
                     amount: remaining,
-                    method: dto.method,
+                    method: dto.method!,
                     proofReference: dto.proofReference,
                     createdById: user.id,
                   },
                 }
               : undefined,
-        },
-        include: {
-          items: true,
-          payments: true,
-        },
-      });
+          },
+          include: {
+            items: true,
+            payments: true,
+          },
+        });
 
-      await this.inventoryOps.sellStock(tx, {
-        branchId: reservation.branchId,
-        productId: reservation.productId,
-        quantity: reservation.quantity,
-        createdById: user.id,
-        referenceId: sale.id,
-        fromReservation: true,
-      });
+        await this.inventoryOps.sellStock(tx, {
+          branchId: reservation.branchId,
+          productId: reservation.productId,
+          quantity: reservation.quantity,
+          createdById: user.id,
+          referenceId: createdSale.id,
+          fromReservation: true,
+        });
 
-      await tx.reservation.update({
-        where: { id },
-        data: {
-          status: ReservationStatus.DELIVERED,
-          paidAmount: reservation.totalAmount,
-        },
-      });
+        await tx.reservation.update({
+          where: { id },
+          data: {
+            status: ReservationStatus.DELIVERED,
+            paidAmount: reservation.totalAmount,
+          },
+        });
 
-      const updatedReservation = await tx.reservation.findUniqueOrThrow({
-        where: { id },
-        include: this.reservationIncludes(),
-      });
+        return createdSale;
+      },
+      { maxWait: 10_000, timeout: 20_000 },
+    );
 
-      return { reservation: updatedReservation, sale };
+    const updatedReservation = await this.prisma.reservation.findUniqueOrThrow({
+      where: { id },
+      include: this.reservationIncludes(),
     });
+
+    return { reservation: updatedReservation, sale };
   }
 
   async cancel(id: string, user: AuthenticatedUser) {
@@ -269,7 +288,8 @@ export class ReservationsService {
       reservation.status === ReservationStatus.READY ||
       reservation.status === ReservationStatus.PENDING;
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(
+      async (tx) => {
       if (hadReservedStock) {
         const inventory = await tx.inventory.findUnique({
           where: {
@@ -311,7 +331,9 @@ export class ReservationsService {
         data: { status: ReservationStatus.CANCELLED },
         include: this.reservationIncludes(),
       });
-    });
+      },
+      { maxWait: 10_000, timeout: 20_000 },
+    );
   }
 
   async changeProduct(
@@ -343,7 +365,8 @@ export class ReservationsService {
       throw new BadRequestException('New product is not reservable');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(
+      async (tx) => {
       if (reservation.status === ReservationStatus.READY) {
         await this.inventoryOps.releaseReservedStock(tx, {
           branchId: reservation.branchId,
@@ -354,8 +377,7 @@ export class ReservationsService {
         });
       }
 
-      const reservationPrice =
-        newProduct.reservationPrice ?? newProduct.sellingPrice;
+      const reservationPrice = this.resolveProductUnitPrice(newProduct);
       const totalAmount = multiplyDecimal(
         reservationPrice,
         reservation.quantity,
@@ -418,7 +440,9 @@ export class ReservationsService {
         },
         include: this.reservationIncludes(),
       });
-    });
+      },
+      { maxWait: 10_000, timeout: 20_000 },
+    );
   }
 
   private resolveBranchId(
@@ -481,6 +505,26 @@ export class ReservationsService {
     }
 
     throw new ForbiddenException('Cannot view this reservation');
+  }
+
+  /**
+   * Prefer selling price when set; otherwise use reservation/initial price.
+   * Matches the booking UI display + deposit cap.
+   */
+  private resolveProductUnitPrice(product: {
+    sellingPrice: { gt?: (n: number) => boolean } | number | string;
+    reservationPrice: { gt?: (n: number) => boolean } | number | string | null;
+  }) {
+    const selling = toDecimal(product.sellingPrice as number | string);
+    if (isPositive(selling)) {
+      return selling;
+    }
+
+    if (product.reservationPrice != null) {
+      return toDecimal(product.reservationPrice as number | string);
+    }
+
+    return selling;
   }
 
   private reservationIncludes() {
