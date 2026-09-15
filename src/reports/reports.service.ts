@@ -165,7 +165,7 @@ export class ReportsService {
           createdAt: dateRange,
           OR: [{ sale: { branchId } }, { reservation: { branchId } }],
         },
-        select: { amount: true },
+        select: { amount: true, method: true },
       }),
       this.prisma.refund.findMany({
         where: {
@@ -214,6 +214,22 @@ export class ReportsService {
     );
     const paymentsNet = Number((paymentsCollected - refundsTotal).toFixed(2));
 
+    const paymentsByMethodMap = new Map<string, number>();
+    for (const row of paymentsList) {
+      const method = String(row.method || 'CASH').toUpperCase();
+      const amount = this.moneyNumber(row.amount);
+      paymentsByMethodMap.set(
+        method,
+        (paymentsByMethodMap.get(method) || 0) + amount,
+      );
+    }
+    const paymentsByMethod = Array.from(paymentsByMethodMap.entries())
+      .map(([method, amount]) => ({
+        method,
+        amount: Number(amount.toFixed(2)),
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
     return {
       section: 'summary' as const,
       branchId,
@@ -229,6 +245,7 @@ export class ReportsService {
         paymentsCollected: Number(paymentsCollected.toFixed(2)),
         refundsTotal: Number(refundsTotal.toFixed(2)),
         paymentsTotal: paymentsNet,
+        paymentsByMethod,
         receivedQty,
         stockOutQty,
         stockMovements: stockMovementsCount,

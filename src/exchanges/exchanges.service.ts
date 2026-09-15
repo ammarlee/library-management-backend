@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProductStatus } from '@prisma/client';
+import { ProductStatus, SaleStatus } from '@prisma/client';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { multiplyDecimal } from '../common/utils/decimal.util';
 import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
@@ -44,12 +44,23 @@ export class ExchangesService {
       throw new NotFoundException('Sale not found');
     }
 
+    if (sale.status === SaleStatus.RETURNED) {
+      throw new BadRequestException('Sale is already fully returned');
+    }
+
     const saleItem = sale.items.find((item) => item.id === dto.saleItemId);
     if (!saleItem) {
       throw new BadRequestException('Sale item not found');
     }
 
+    if (saleItem.productId === dto.newProductId) {
+      throw new BadRequestException('New product must be different from the current product');
+    }
+
     const remaining = saleItem.quantity - saleItem.returnedQuantity;
+    if (remaining <= 0) {
+      throw new BadRequestException('No remaining quantity available for exchange');
+    }
     if (dto.quantity > remaining) {
       throw new BadRequestException('Exchange quantity exceeds remaining quantity');
     }
@@ -58,8 +69,25 @@ export class ExchangesService {
       where: { id: dto.newProductId },
     });
 
-    if (!newProduct || newProduct.status !== ProductStatus.ACTIVE) {
+    if (!newProduct || newProduct.status === ProductStatus.INACTIVE) {
       throw new BadRequestException('New product not found or inactive');
+    }
+
+    const inventory = await this.prisma.inventory.findUnique({
+      where: {
+        branchId_productId: {
+          branchId: sale.branchId,
+          productId: dto.newProductId,
+        },
+      },
+    });
+
+    const available =
+      (inventory?.physicalQuantity || 0) - (inventory?.reservedQuantity || 0);
+    if (!inventory || available < dto.quantity) {
+      throw new BadRequestException(
+        'New product is not available in the sale branch stock',
+      );
     }
 
     const oldTotal = multiplyDecimal(saleItem.unitPrice, dto.quantity);
@@ -126,6 +154,27 @@ export class ExchangesService {
         where: { id: saleItem.id },
         data: {
           returnedQuantity: saleItem.returnedQuantity + dto.quantity,
+        },
+      });
+
+      // Keep sale total aligned with net money movement after exchange.
+      await tx.sale.update({
+        where: { id: sale.id },
+        data: {
+          totalAmount: sale.totalAmount.add(differenceAmount),
+        },
+      });
+
+      // Track the replacement product on the sale for future refund/exchange.
+      await tx.saleItem.create({
+        data: {
+          saleId: sale.id,
+          productId: dto.newProductId,
+          quantity: dto.quantity,
+          unitPrice: newProduct.sellingPrice,
+          unitCost: newProduct.purchasePrice,
+          total: newTotal,
+          returnedQuantity: 0,
         },
       });
 

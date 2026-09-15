@@ -144,7 +144,11 @@ export class SalesService {
         select: { id: true, fullName: true, email: true },
       },
       items: {
-        include: { product: true },
+        include: {
+          product: {
+            include: { teacher: true },
+          },
+        },
       },
       payments: true,
       returns: true,
