@@ -8,6 +8,26 @@ import { ReportQueryDto } from './dto/report-query.dto';
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Prisma Decimal / string / number → plain number */
+  private moneyNumber(value: unknown): number {
+    if (value == null) return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (typeof value === 'string') {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'toNumber' in value &&
+      typeof (value as { toNumber: unknown }).toNumber === 'function'
+    ) {
+      return (value as { toNumber: () => number }).toNumber();
+    }
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+
   async getDailyReport(user: AuthenticatedUser, query: ReportQueryDto) {
     const range = this.buildDateRange(query);
 
@@ -63,13 +83,16 @@ export class ReportsService {
         sales,
         reservations,
         deliveredReservations,
+        cancelledReservations,
         returns,
         exchanges,
-        payments,
         stockMovements,
         salesList,
         reservationsList,
         deliveredList,
+        cancelledList,
+        refundsList,
+        paymentsList,
       ] = await Promise.all([
         this.prisma.sale.count({
           where: { branchId, createdAt: dateRange },
@@ -84,18 +107,18 @@ export class ReportsService {
             updatedAt: dateRange,
           },
         }),
+        this.prisma.reservation.count({
+          where: {
+            branchId,
+            status: ReservationStatus.CANCELLED,
+            updatedAt: dateRange,
+          },
+        }),
         this.prisma.productReturn.count({
           where: { sale: { branchId }, createdAt: dateRange },
         }),
         this.prisma.exchange.count({
           where: { sale: { branchId }, createdAt: dateRange },
-        }),
-        this.prisma.payment.aggregate({
-          where: {
-            createdAt: dateRange,
-            OR: [{ sale: { branchId } }, { reservation: { branchId } }],
-          },
-          _sum: { amount: true },
         }),
         this.prisma.stockMovement.findMany({
           where: { branchId, createdAt: dateRange },
@@ -126,6 +149,7 @@ export class ReportsService {
             product: { select: { id: true, name: true } },
             createdBy: { select: { id: true, fullName: true } },
             payments: true,
+            refunds: true,
           },
           orderBy: { createdAt: 'desc' },
         }),
@@ -141,6 +165,57 @@ export class ReportsService {
             createdBy: { select: { id: true, fullName: true } },
           },
           orderBy: { updatedAt: 'desc' },
+        }),
+        this.prisma.reservation.findMany({
+          where: {
+            branchId,
+            status: ReservationStatus.CANCELLED,
+            updatedAt: dateRange,
+          },
+          include: {
+            student: { select: { id: true, name: true, phone: true } },
+            product: { select: { id: true, name: true } },
+            createdBy: { select: { id: true, fullName: true } },
+            payments: true,
+            refunds: true,
+          },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        this.prisma.refund.findMany({
+          where: {
+            createdAt: dateRange,
+            OR: [
+              { sale: { branchId } },
+              { reservation: { branchId } },
+              { returnRecord: { sale: { branchId } } },
+              { exchange: { sale: { branchId } } },
+            ],
+          },
+          include: {
+            reservation: {
+              select: {
+                id: true,
+                reservationNumber: true,
+                student: { select: { name: true } },
+                product: { select: { name: true } },
+              },
+            },
+            sale: {
+              select: {
+                id: true,
+                student: { select: { name: true } },
+              },
+            },
+            createdBy: { select: { id: true, fullName: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.payment.findMany({
+          where: {
+            createdAt: dateRange,
+            OR: [{ sale: { branchId } }, { reservation: { branchId } }],
+          },
+          select: { id: true, amount: true },
         }),
       ]);
 
@@ -168,6 +243,18 @@ export class ReportsService {
         0,
       );
 
+      // paymentsTotal = money collected today − refunds issued today
+      // (cancel reservation creates a Refund for the deposit → net drops)
+      const paymentsCollected = paymentsList.reduce(
+        (sum, row) => sum + this.moneyNumber(row.amount),
+        0,
+      );
+      const refundsTotal = refundsList.reduce(
+        (sum, row) => sum + this.moneyNumber(row.amount),
+        0,
+      );
+      const paymentsNet = Number((paymentsCollected - refundsTotal).toFixed(2));
+
       return {
         branchId,
         from: dateRange.gte,
@@ -176,9 +263,13 @@ export class ReportsService {
           sales,
           reservations,
           deliveredReservations,
+          cancelledReservations,
           returns,
           exchanges,
-          paymentsTotal: payments._sum.amount ?? 0,
+          paymentsCollected: Number(paymentsCollected.toFixed(2)),
+          refundsTotal: Number(refundsTotal.toFixed(2)),
+          /** Net cash after refunds */
+          paymentsTotal: paymentsNet,
           receivedQty,
           stockOutQty,
           stockMovements: stockMovements.length,
@@ -186,6 +277,8 @@ export class ReportsService {
         sales: salesList,
         reservations: reservationsList,
         deliveredReservations: deliveredList,
+        cancelledReservations: cancelledList,
+        refunds: refundsList,
         receivedProducts: receivedStock,
         stockOutProducts,
         stockMovements,
