@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeacherDto } from './dto/create-teacher.dto';
+import { TeacherQueryDto } from './dto/teacher-query.dto';
 import { UpdateTeacherDto } from './dto/update-teacher.dto';
 import { UpdateTeacherStatusDto } from './dto/update-teacher-status.dto';
 
@@ -8,8 +10,22 @@ import { UpdateTeacherStatusDto } from './dto/update-teacher-status.dto';
 export class TeachersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.prisma.teacher.findMany({ orderBy: { name: 'asc' } });
+  findAll(query: TeacherQueryDto = {}) {
+    const where: Prisma.TeacherWhereInput = {};
+
+    const search = query.search?.trim();
+    if (search) {
+      where.name = { contains: search, mode: 'insensitive' };
+    }
+
+    if (query.status) {
+      where.status = query.status;
+    }
+
+    return this.prisma.teacher.findMany({
+      where,
+      orderBy: { name: 'asc' },
+    });
   }
 
   async findOne(id: string) {

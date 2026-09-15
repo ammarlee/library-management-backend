@@ -10,6 +10,7 @@ import {
   IsString,
   IsUUID,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateProductDto {
@@ -28,10 +29,11 @@ export class UpdateProductDto {
   @IsUUID()
   teacherId?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsUUID()
-  studyYearId?: string;
+  studyYearId?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -64,10 +66,11 @@ export class UpdateProductDto {
   @IsBoolean()
   reservationAllowed?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
-  reservationPrice?: number;
+  reservationPrice?: number | null;
 }

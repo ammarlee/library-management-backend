@@ -22,4 +22,11 @@ export class AuthController {
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.getProfile(user);
   }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  logout(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.logout(user);
+  }
 }

@@ -12,6 +12,7 @@ async function bootstrap() {
   const defaultOrigins = [
     'http://localhost:8000',
     'http://127.0.0.1:8000',
+    'https://performance-v2-new.vercel.app',
   ];
   const extraOrigins = (configService.get<string>('corsOrigin') ?? '')
     .split(',')
@@ -55,9 +56,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document);
 
-  // const port = configService.get<number>('port') ?? 3000;
+  const port = configService.get<number>('port') ?? 3000;
 
-  const port = parseInt(process.env.PORT || '3000', 10);
   console.log('port in the main.ts', port);
 
   await app.listen(port, '0.0.0.0');

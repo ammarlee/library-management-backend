@@ -55,7 +55,7 @@ export class InventoryOperationsService {
 
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM "Inventory"
-      WHERE "branchId" = ${branchId}::uuid AND "productId" = ${productId}::uuid
+      WHERE "branchId" = ${branchId} AND "productId" = ${productId}
       FOR UPDATE
     `;
 

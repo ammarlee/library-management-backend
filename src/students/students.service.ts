@@ -9,10 +9,24 @@ import { UpdateStudentDto } from './dto/update-student.dto';
 export class StudentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
+  findAll(search?: string) {
+    const term = search?.trim();
+    const where: Prisma.StudentWhereInput = {
+      deletedAt: null,
+      ...(term
+        ? {
+            OR: [
+              { name: { contains: term, mode: 'insensitive' } },
+              { phone: { contains: term, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
     return this.prisma.student.findMany({
-      where: { deletedAt: null },
+      where,
       orderBy: { createdAt: 'desc' },
+      take: term ? 50 : undefined,
     });
   }
 

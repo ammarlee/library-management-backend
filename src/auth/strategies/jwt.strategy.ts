@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 interface JwtPayload {
   sub: string;
   role: string;
+  tv?: number;
 }
 
 @Injectable()
@@ -31,6 +32,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('User is inactive or not found');
+    }
+
+    if (payload.tv !== user.tokenVersion) {
+      throw new UnauthorizedException('Token has been revoked');
     }
 
     return {

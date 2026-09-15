@@ -21,27 +21,30 @@ import { UpdateBranchStatusDto } from './dto/update-branch-status.dto';
 @ApiTags('branches')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
 @Controller('branches')
 export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
 
   @Get()
+  @Roles(UserRole.ADMIN, UserRole.CUSTOMER_SERVICE, UserRole.BRANCH_EMPLOYEE)
   findAll() {
     return this.branchesService.findAll();
   }
 
   @Post()
+  @Roles(UserRole.ADMIN)
   create(@Body() dto: CreateBranchDto) {
     return this.branchesService.create(dto);
   }
 
   @Get(':id')
+  @Roles(UserRole.ADMIN, UserRole.CUSTOMER_SERVICE, UserRole.BRANCH_EMPLOYEE)
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.branchesService.findOne(id);
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN)
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateBranchDto,
@@ -50,6 +53,7 @@ export class BranchesController {
   }
 
   @Patch(':id/status')
+  @Roles(UserRole.ADMIN)
   updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateBranchStatusDto,

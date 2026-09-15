@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -14,6 +15,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateTeacherDto } from './dto/create-teacher.dto';
+import { TeacherQueryDto } from './dto/teacher-query.dto';
 import { UpdateTeacherDto } from './dto/update-teacher.dto';
 import { UpdateTeacherStatusDto } from './dto/update-teacher-status.dto';
 import { TeachersService } from './teachers.service';
@@ -27,8 +29,8 @@ export class TeachersController {
   constructor(private readonly teachersService: TeachersService) {}
 
   @Get()
-  findAll() {
-    return this.teachersService.findAll();
+  findAll(@Query() query: TeacherQueryDto) {
+    return this.teachersService.findAll(query);
   }
 
   @Post()

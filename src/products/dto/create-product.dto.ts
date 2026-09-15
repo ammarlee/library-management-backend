@@ -32,9 +32,12 @@ export class CreateProductDto {
   @IsUUID()
   studyYearId?: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional({
+    description: 'Optional. Defaults to the currently active academic year.',
+  })
+  @IsOptional()
   @IsUUID()
-  academicYearId: string;
+  academicYearId?: string;
 
   @ApiProperty()
   @Type(() => Number)

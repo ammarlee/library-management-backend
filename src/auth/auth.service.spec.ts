@@ -15,6 +15,7 @@ describe('AuthService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      update: jest.fn(),
     },
   };
 
@@ -39,6 +40,7 @@ describe('AuthService', () => {
       role: UserRole.ADMIN,
       status: UserStatus.ACTIVE,
       branchId: null,
+      tokenVersion: 3,
     });
 
     (argon2.verify as jest.Mock).mockResolvedValue(true);
@@ -50,6 +52,11 @@ describe('AuthService', () => {
 
     expect(result.accessToken).toBe('token');
     expect(result.user.email).toBe('admin@library.local');
+    expect(jwtService.signAsync).toHaveBeenCalledWith({
+      sub: 'user-1',
+      role: UserRole.ADMIN,
+      tv: 3,
+    });
   });
 
   it('rejects inactive user', async () => {
@@ -62,6 +69,7 @@ describe('AuthService', () => {
       role: UserRole.ADMIN,
       status: UserStatus.INACTIVE,
       branchId: null,
+      tokenVersion: 0,
     });
 
     await expect(
@@ -70,5 +78,25 @@ describe('AuthService', () => {
         password: 'Password123!',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('increments tokenVersion on logout', async () => {
+    prisma.user.update.mockResolvedValue({ id: 'user-1', tokenVersion: 1 });
+
+    const result = await service.logout({
+      id: 'user-1',
+      email: 'admin@library.local',
+      fullName: 'Admin',
+      phone: null,
+      role: UserRole.ADMIN,
+      status: UserStatus.ACTIVE,
+      branchId: null,
+    });
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { tokenVersion: { increment: 1 } },
+    });
+    expect(result.success).toBe(true);
   });
 });

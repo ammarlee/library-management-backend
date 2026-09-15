@@ -92,6 +92,7 @@ model User {
   phone        String?
   role         UserRole
   status       UserStatus @default(ACTIVE)
+  tokenVersion Int        @default(0)
 
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])

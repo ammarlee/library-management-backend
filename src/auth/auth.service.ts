@@ -30,6 +30,7 @@ export class AuthService {
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
       role: user.role,
+      tv: user.tokenVersion,
     });
 
     return {
@@ -40,6 +41,15 @@ export class AuthService {
 
   getProfile(user: AuthenticatedUser) {
     return user;
+  }
+
+  async logout(user: AuthenticatedUser) {
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { tokenVersion: { increment: 1 } },
+    });
+
+    return { success: true, message: 'Logged out successfully' };
   }
 
   private toAuthenticatedUser(user: {

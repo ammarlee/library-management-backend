@@ -1,8 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { AcademicYearStatus, Prisma, ProductType } from '@prisma/client';
 import { toDecimal } from '../common/utils/decimal.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { ProductQueryDto } from './dto/product-query.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductStatusDto } from './dto/update-product-status.dto';
 
@@ -10,8 +15,55 @@ import { UpdateProductStatusDto } from './dto/update-product-status.dto';
 export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
+  findAll(query: ProductQueryDto = {}) {
+    const where: Prisma.ProductWhereInput = {};
+    const and: Prisma.ProductWhereInput[] = [];
+
+    if (query.teacherId) {
+      where.teacherId = query.teacherId;
+    }
+
+    if (query.type) {
+      where.type = query.type;
+    }
+
+    if (query.studyYearId) {
+      where.studyYearId = query.studyYearId;
+    }
+
+    const search = query.search?.trim();
+    if (search) {
+      const upper = search.toUpperCase();
+      const typeMatches = Object.values(ProductType).filter((type) =>
+        type.includes(upper),
+      );
+
+      and.push({
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { teacher: { name: { contains: search, mode: 'insensitive' } } },
+          { studyYear: { name: { contains: search, mode: 'insensitive' } } },
+          ...(typeMatches.length
+            ? [{ type: { in: typeMatches } }]
+            : []),
+          ...(search.includes('كتاب') || search.toLowerCase().includes('book')
+            ? [{ type: ProductType.BOOK }]
+            : []),
+          ...(search.includes('كارت') ||
+          search.includes('كارد') ||
+          search.toLowerCase().includes('card')
+            ? [{ type: ProductType.CARD }]
+            : []),
+        ],
+      });
+    }
+
+    if (and.length) {
+      where.AND = and;
+    }
+
     return this.prisma.product.findMany({
+      where,
       include: {
         teacher: true,
         studyYear: true,
@@ -38,14 +90,17 @@ export class ProductsService {
     return product;
   }
 
-  create(dto: CreateProductDto) {
+  async create(dto: CreateProductDto) {
+    const academicYearId =
+      dto.academicYearId ?? (await this.resolveActiveAcademicYearId());
+
     return this.prisma.product.create({
       data: {
         name: dto.name,
         type: dto.type,
         teacherId: dto.teacherId,
         studyYearId: dto.studyYearId,
-        academicYearId: dto.academicYearId,
+        academicYearId,
         purchasePrice: toDecimal(dto.purchasePrice),
         sellingPrice: toDecimal(dto.sellingPrice),
         profitPercentage: toDecimal(dto.profitPercentage),
@@ -73,7 +128,10 @@ export class ProductsService {
       data.teacher = { connect: { id: dto.teacherId } };
     }
     if (dto.studyYearId !== undefined) {
-      data.studyYear = { connect: { id: dto.studyYearId } };
+      data.studyYear =
+        dto.studyYearId === null
+          ? { disconnect: true }
+          : { connect: { id: dto.studyYearId } };
     }
     if (dto.academicYearId !== undefined) {
       data.academicYear = { connect: { id: dto.academicYearId } };
@@ -91,7 +149,10 @@ export class ProductsService {
       data.reservationAllowed = dto.reservationAllowed;
     }
     if (dto.reservationPrice !== undefined) {
-      data.reservationPrice = toDecimal(dto.reservationPrice);
+      data.reservationPrice =
+        dto.reservationPrice === null
+          ? null
+          : toDecimal(dto.reservationPrice);
     }
 
     return this.prisma.product.update({
@@ -116,5 +177,17 @@ export class ProductsService {
         academicYear: true,
       },
     });
+  }
+
+  private async resolveActiveAcademicYearId() {
+    const active = await this.prisma.academicYear.findFirst({
+      where: { status: AcademicYearStatus.ACTIVE },
+    });
+
+    if (!active) {
+      throw new BadRequestException('No active academic year found');
+    }
+
+    return active.id;
   }
 }

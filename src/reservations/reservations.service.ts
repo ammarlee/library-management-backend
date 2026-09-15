@@ -95,62 +95,66 @@ export class ReservationsService {
       throw new BadRequestException('Deposit cannot exceed reservation total');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const inventory = await tx.inventory.findUnique({
-        where: {
-          branchId_productId: { branchId, productId: dto.productId },
-        },
-      });
-
-      const available = inventory
-        ? this.inventoryOps.getAvailableQuantity(inventory)
-        : 0;
-
-      const status =
-        available >= dto.quantity
-          ? ReservationStatus.READY
-          : ReservationStatus.WAITING_FOR_STOCK;
-
-      const reservation = await tx.reservation.create({
-        data: {
-          reservationNumber: generateReservationNumber(),
-          studentId: dto.studentId,
-          branchId,
-          productId: dto.productId,
-          createdById: user.id,
-          quantity: dto.quantity,
-          reservationPrice,
-          totalAmount,
-          paidAmount: deposit,
-          status,
-        },
-      });
-
-      if (status === ReservationStatus.READY) {
-        await this.inventoryOps.ensureInventory(tx, branchId, dto.productId);
-        await this.inventoryOps.reserveStock(tx, {
-          branchId,
-          productId: dto.productId,
-          quantity: dto.quantity,
-          createdById: user.id,
-          referenceId: reservation.id,
+    const reservationId = await this.prisma.$transaction(
+      async (tx) => {
+        const inventory = await tx.inventory.findUnique({
+          where: {
+            branchId_productId: { branchId, productId: dto.productId },
+          },
         });
-      }
 
-      await tx.payment.create({
-        data: {
-          reservationId: reservation.id,
-          amount: deposit,
-          method: dto.method,
-          proofReference: dto.proofReference,
-          createdById: user.id,
-        },
-      });
+        const available = inventory
+          ? this.inventoryOps.getAvailableQuantity(inventory)
+          : 0;
 
-      return tx.reservation.findUniqueOrThrow({
-        where: { id: reservation.id },
-        include: this.reservationIncludes(),
-      });
+        const status =
+          available >= dto.quantity
+            ? ReservationStatus.READY
+            : ReservationStatus.WAITING_FOR_STOCK;
+
+        const reservation = await tx.reservation.create({
+          data: {
+            reservationNumber: await generateReservationNumber(tx),
+            studentId: dto.studentId,
+            branchId,
+            productId: dto.productId,
+            createdById: user.id,
+            quantity: dto.quantity,
+            reservationPrice,
+            totalAmount,
+            paidAmount: deposit,
+            status,
+          },
+        });
+
+        if (status === ReservationStatus.READY) {
+          await this.inventoryOps.reserveStock(tx, {
+            branchId,
+            productId: dto.productId,
+            quantity: dto.quantity,
+            createdById: user.id,
+            referenceId: reservation.id,
+          });
+        }
+
+        await tx.payment.create({
+          data: {
+            reservationId: reservation.id,
+            amount: deposit,
+            method: dto.method,
+            proofReference: dto.proofReference,
+            createdById: user.id,
+          },
+        });
+
+        return reservation.id;
+      },
+      { maxWait: 10_000, timeout: 20_000 },
+    );
+
+    return this.prisma.reservation.findUniqueOrThrow({
+      where: { id: reservationId },
+      include: this.reservationIncludes(),
     });
   }
 
