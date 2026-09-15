@@ -87,43 +87,51 @@ export class SalesService {
     const unitCost = product.purchasePrice;
     const itemTotal = multiplyDecimal(unitPrice, dto.quantity);
 
-    return this.prisma.$transaction(async (tx) => {
-      const sale = await tx.sale.create({
-        data: {
-          studentId: dto.studentId,
+    const saleId = await this.prisma.$transaction(
+      async (tx) => {
+        const sale = await tx.sale.create({
+          data: {
+            studentId: dto.studentId,
+            branchId,
+            createdById: user.id,
+            totalAmount: itemTotal,
+            items: {
+              create: {
+                productId: dto.productId,
+                quantity: dto.quantity,
+                unitPrice,
+                unitCost,
+                total: itemTotal,
+              },
+            },
+            payments: {
+              create: {
+                amount: itemTotal,
+                method: dto.method,
+                proofReference: dto.proofReference,
+                createdById: user.id,
+              },
+            },
+          },
+          select: { id: true },
+        });
+
+        await this.inventoryOps.sellStock(tx, {
           branchId,
+          productId: dto.productId,
+          quantity: dto.quantity,
           createdById: user.id,
-          totalAmount: itemTotal,
-          items: {
-            create: {
-              productId: dto.productId,
-              quantity: dto.quantity,
-              unitPrice,
-              unitCost,
-              total: itemTotal,
-            },
-          },
-          payments: {
-            create: {
-              amount: itemTotal,
-              method: dto.method,
-              proofReference: dto.proofReference,
-              createdById: user.id,
-            },
-          },
-        },
-        include: this.saleIncludes(),
-      });
+          referenceId: sale.id,
+        });
 
-      await this.inventoryOps.sellStock(tx, {
-        branchId,
-        productId: dto.productId,
-        quantity: dto.quantity,
-        createdById: user.id,
-        referenceId: sale.id,
-      });
+        return sale.id;
+      },
+      { maxWait: 10_000, timeout: 20_000 },
+    );
 
-      return sale;
+    return this.prisma.sale.findUniqueOrThrow({
+      where: { id: saleId },
+      include: this.saleIncludes(),
     });
   }
 

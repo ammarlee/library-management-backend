@@ -72,6 +72,7 @@ enum PaymentMethod {
 
 enum StockMovementType {
   STOCK_IN
+  STOCK_OUT
   SALE
   RESERVATION
   RESERVATION_RELEASE

@@ -128,7 +128,7 @@ export class InventoryService {
           productId,
           quantity: dto.quantity,
           createdById: user.id,
-          movementType: StockMovementType.DAMAGED,
+          movementType: StockMovementType.STOCK_OUT,
           note: dto.note,
         }),
       { maxWait: 10_000, timeout: 20_000 },
