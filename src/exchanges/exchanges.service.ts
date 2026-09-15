@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ProductStatus } from '@prisma/client';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { multiplyDecimal } from '../common/utils/decimal.util';
+import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
 import { InventoryOperationsService } from '../inventory/inventory-operations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateExchangeDto } from './dto/create-exchange.dto';
@@ -132,7 +133,7 @@ export class ExchangesService {
         where: { id: exchange.id },
         include: this.exchangeIncludes(),
       });
-    });
+    }, PRISMA_TX_OPTIONS);
   }
 
   private exchangeIncludes() {

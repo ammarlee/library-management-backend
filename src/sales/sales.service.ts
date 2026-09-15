@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { multiplyDecimal } from '../common/utils/decimal.util';
+import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
 import { InventoryOperationsService } from '../inventory/inventory-operations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -126,7 +127,7 @@ export class SalesService {
 
         return sale.id;
       },
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
 
     return this.prisma.sale.findUniqueOrThrow({

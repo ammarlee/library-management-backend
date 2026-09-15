@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, StudentLogAction, StudentStatus } from '@prisma/client';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
@@ -71,7 +72,7 @@ export class StudentsService {
       });
 
       return result;
-    });
+    }, PRISMA_TX_OPTIONS);
 
     return updated;
   }
@@ -100,7 +101,7 @@ export class StudentsService {
       });
 
       return result;
-    });
+    }, PRISMA_TX_OPTIONS);
   }
 
   private toLogData(student: {

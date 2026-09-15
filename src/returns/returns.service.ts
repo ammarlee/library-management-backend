@@ -3,6 +3,7 @@ import { SaleStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { multiplyDecimal } from '../common/utils/decimal.util';
+import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
 import { InventoryOperationsService } from '../inventory/inventory-operations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReturnDto } from './dto/create-return.dto';
@@ -147,7 +148,7 @@ export class ReturnsService {
         where: { id: returnRecord.id },
         include: this.returnIncludes(),
       });
-    });
+    }, PRISMA_TX_OPTIONS);
   }
 
   private returnIncludes() {

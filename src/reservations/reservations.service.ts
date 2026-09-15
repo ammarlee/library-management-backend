@@ -18,6 +18,7 @@ import {
   multiplyDecimal,
   toDecimal,
 } from '../common/utils/decimal.util';
+import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
 import { generateReservationNumber } from '../common/utils/reservation-number.util';
 import { InventoryOperationsService } from '../inventory/inventory-operations.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -151,7 +152,7 @@ export class ReservationsService {
 
         return reservation.id;
       },
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
 
     return this.prisma.reservation.findUniqueOrThrow({
@@ -257,7 +258,7 @@ export class ReservationsService {
 
         return createdSale;
       },
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
 
     const updatedReservation = await this.prisma.reservation.findUniqueOrThrow({
@@ -332,7 +333,7 @@ export class ReservationsService {
         include: this.reservationIncludes(),
       });
       },
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
   }
 
@@ -441,7 +442,7 @@ export class ReservationsService {
         include: this.reservationIncludes(),
       });
       },
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
   }
 

@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProductStatus, StockMovementType, UserRole } from '@prisma/client';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { InventoryQueryDto } from './dto/inventory-query.dto';
@@ -125,7 +126,7 @@ export class InventoryService {
           createdById: user.id,
           note: dto.note,
         }),
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
   }
 
@@ -147,7 +148,7 @@ export class InventoryService {
           movementType: StockMovementType.STOCK_OUT,
           note: dto.note,
         }),
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
   }
 
@@ -168,7 +169,7 @@ export class InventoryService {
           createdById: user.id,
           note: dto.note,
         }),
-      { maxWait: 10_000, timeout: 20_000 },
+      PRISMA_TX_OPTIONS,
     );
   }
 

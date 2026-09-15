@@ -153,23 +153,18 @@ export class ReportsService {
             m.movementType !== StockMovementType.RESERVATION &&
             m.movementType !== StockMovementType.RESERVATION_RELEASE),
       );
-      const takenStock = stockMovements.filter(
+      const stockOutProducts = stockMovements.filter(
         (m) =>
           m.movementType === StockMovementType.STOCK_OUT ||
-          m.movementType === StockMovementType.DAMAGED ||
-          m.movementType === StockMovementType.SALE ||
-          (m.physicalQuantityChange < 0 &&
-            m.movementType !== StockMovementType.ADJUSTMENT &&
-            m.movementType !== StockMovementType.RESERVATION &&
-            m.movementType !== StockMovementType.RESERVATION_RELEASE),
+          m.movementType === StockMovementType.DAMAGED,
       );
 
       const receivedQty = receivedStock.reduce(
         (sum, m) => sum + Math.max(0, m.physicalQuantityChange),
         0,
       );
-      const takenQty = takenStock.reduce(
-        (sum, m) => sum + Math.abs(Math.min(0, m.physicalQuantityChange)),
+      const stockOutQty = stockOutProducts.reduce(
+        (sum, m) => sum + Math.abs(m.physicalQuantityChange),
         0,
       );
 
@@ -185,14 +180,14 @@ export class ReportsService {
           exchanges,
           paymentsTotal: payments._sum.amount ?? 0,
           receivedQty,
-          takenQty,
+          stockOutQty,
           stockMovements: stockMovements.length,
         },
         sales: salesList,
         reservations: reservationsList,
         deliveredReservations: deliveredList,
         receivedProducts: receivedStock,
-        takenProducts: takenStock,
+        stockOutProducts,
         stockMovements,
       };
     }

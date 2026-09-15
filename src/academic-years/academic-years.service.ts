@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AcademicYearStatus } from '@prisma/client';
+import { PRISMA_TX_OPTIONS } from '../common/utils/prisma-tx.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 
@@ -57,6 +58,6 @@ export class AcademicYearsService {
         where: { id },
         data: { status: AcademicYearStatus.ACTIVE },
       });
-    });
+    }, PRISMA_TX_OPTIONS);
   }
 }
