@@ -11,4 +11,13 @@ export class InventoryQueryDto {
   @Transform(({ value }) => value === true || value === 'true' || value === '1')
   @IsBoolean()
   availableOnly?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'When true, return products allowed for reservation at this branch (in stock or out of stock), including reservable products with no inventory row yet. Excludes INACTIVE products.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  forReservation?: boolean;
 }

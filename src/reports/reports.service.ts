@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { ReservationStatus, UserRole } from '@prisma/client';
+import { ReservationStatus, StockMovementType, UserRole } from '@prisma/client';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportQueryDto } from './dto/report-query.dto';
@@ -57,48 +57,143 @@ export class ReportsService {
 
     if (user.role === UserRole.BRANCH_EMPLOYEE && user.branchId) {
       const branchId = user.branchId;
+      const dateRange = this.buildDateRange(query);
 
-      const [sales, reservations, deliveredReservations, returns, exchanges, payments] =
-        await Promise.all([
-          this.prisma.sale.count({
-            where: { branchId, createdAt: range },
-          }),
-          this.prisma.reservation.count({
-            where: { branchId, createdAt: range },
-          }),
-          this.prisma.reservation.count({
-            where: {
-              branchId,
-              status: ReservationStatus.DELIVERED,
-              updatedAt: range,
-            },
-          }),
-          this.prisma.productReturn.count({
-            where: { sale: { branchId }, createdAt: range },
-          }),
-          this.prisma.exchange.count({
-            where: { sale: { branchId }, createdAt: range },
-          }),
-          this.prisma.payment.aggregate({
-            where: {
-              createdAt: range,
-              OR: [
-                { sale: { branchId } },
-                { reservation: { branchId } },
-              ],
-            },
-            _sum: { amount: true },
-          }),
-        ]);
-
-      return {
-        branchId,
+      const [
         sales,
         reservations,
         deliveredReservations,
         returns,
         exchanges,
-        paymentsTotal: payments._sum.amount,
+        payments,
+        stockMovements,
+        salesList,
+        reservationsList,
+        deliveredList,
+      ] = await Promise.all([
+        this.prisma.sale.count({
+          where: { branchId, createdAt: dateRange },
+        }),
+        this.prisma.reservation.count({
+          where: { branchId, createdAt: dateRange },
+        }),
+        this.prisma.reservation.count({
+          where: {
+            branchId,
+            status: ReservationStatus.DELIVERED,
+            updatedAt: dateRange,
+          },
+        }),
+        this.prisma.productReturn.count({
+          where: { sale: { branchId }, createdAt: dateRange },
+        }),
+        this.prisma.exchange.count({
+          where: { sale: { branchId }, createdAt: dateRange },
+        }),
+        this.prisma.payment.aggregate({
+          where: {
+            createdAt: dateRange,
+            OR: [{ sale: { branchId } }, { reservation: { branchId } }],
+          },
+          _sum: { amount: true },
+        }),
+        this.prisma.stockMovement.findMany({
+          where: { branchId, createdAt: dateRange },
+          include: {
+            product: { select: { id: true, name: true, type: true } },
+            createdBy: { select: { id: true, fullName: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.sale.findMany({
+          where: { branchId, createdAt: dateRange },
+          include: {
+            student: { select: { id: true, name: true, phone: true } },
+            items: {
+              include: {
+                product: { select: { id: true, name: true } },
+              },
+            },
+            payments: true,
+            createdBy: { select: { id: true, fullName: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.reservation.findMany({
+          where: { branchId, createdAt: dateRange },
+          include: {
+            student: { select: { id: true, name: true, phone: true } },
+            product: { select: { id: true, name: true } },
+            createdBy: { select: { id: true, fullName: true } },
+            payments: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.reservation.findMany({
+          where: {
+            branchId,
+            status: ReservationStatus.DELIVERED,
+            updatedAt: dateRange,
+          },
+          include: {
+            student: { select: { id: true, name: true, phone: true } },
+            product: { select: { id: true, name: true } },
+            createdBy: { select: { id: true, fullName: true } },
+          },
+          orderBy: { updatedAt: 'desc' },
+        }),
+      ]);
+
+      const receivedStock = stockMovements.filter(
+        (m) =>
+          m.movementType === StockMovementType.STOCK_IN ||
+          m.movementType === StockMovementType.RETURN ||
+          (m.physicalQuantityChange > 0 &&
+            m.movementType !== StockMovementType.ADJUSTMENT &&
+            m.movementType !== StockMovementType.RESERVATION &&
+            m.movementType !== StockMovementType.RESERVATION_RELEASE),
+      );
+      const takenStock = stockMovements.filter(
+        (m) =>
+          m.movementType === StockMovementType.STOCK_OUT ||
+          m.movementType === StockMovementType.DAMAGED ||
+          m.movementType === StockMovementType.SALE ||
+          (m.physicalQuantityChange < 0 &&
+            m.movementType !== StockMovementType.ADJUSTMENT &&
+            m.movementType !== StockMovementType.RESERVATION &&
+            m.movementType !== StockMovementType.RESERVATION_RELEASE),
+      );
+
+      const receivedQty = receivedStock.reduce(
+        (sum, m) => sum + Math.max(0, m.physicalQuantityChange),
+        0,
+      );
+      const takenQty = takenStock.reduce(
+        (sum, m) => sum + Math.abs(Math.min(0, m.physicalQuantityChange)),
+        0,
+      );
+
+      return {
+        branchId,
+        from: dateRange.gte,
+        to: dateRange.lte,
+        summary: {
+          sales,
+          reservations,
+          deliveredReservations,
+          returns,
+          exchanges,
+          paymentsTotal: payments._sum.amount ?? 0,
+          receivedQty,
+          takenQty,
+          stockMovements: stockMovements.length,
+        },
+        sales: salesList,
+        reservations: reservationsList,
+        deliveredReservations: deliveredList,
+        receivedProducts: receivedStock,
+        takenProducts: takenStock,
+        stockMovements,
       };
     }
 

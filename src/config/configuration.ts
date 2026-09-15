@@ -15,5 +15,9 @@ export default () => ({
     region: process.env.AWS_REGION ?? 'us-east-2',
     paymentScreensBucket: process.env.PAYMENT_SCREENS_BUCKET ?? 'payment-screens',
     paymentScreenshotMaxBytes: getPaymentScreenshotMaxBytes(),
+    signedUrlExpiresIn: parseInt(
+      process.env.PAYMENT_SCREENSHOT_SIGNED_URL_EXPIRES_IN ?? '300',
+      10,
+    ),
   },
 });

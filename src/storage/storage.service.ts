@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
@@ -22,9 +24,17 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   'image/webp': 'webp',
 };
 
+const EXTENSION_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
 export interface UploadedPaymentScreenshot {
   file_url: string;
   mime_type: string;
+  key: string;
 }
 
 @Injectable()
@@ -33,6 +43,7 @@ export class StorageService {
   private readonly bucket: string;
   private readonly endpoint: string;
   private readonly maxBytes: number;
+  private readonly signedUrlExpiresIn: number;
 
   constructor(private readonly config: ConfigService) {
     this.bucket =
@@ -46,6 +57,9 @@ export class StorageService {
     this.maxBytes = this.config.getOrThrow<number>(
       'storage.paymentScreenshotMaxBytes',
     );
+    this.signedUrlExpiresIn =
+      this.config.get<number>('storage.signedUrlExpiresIn') ?? 300;
+
     const accessKeyId =
       this.config.get<string>('storage.accessKeyId') ??
       process.env.AWS_ACCESS_KEY_ID;
@@ -69,6 +83,30 @@ export class StorageService {
             },
           })
         : null;
+  }
+
+  async getSignedUrl(key: string, expiresIn = this.signedUrlExpiresIn) {
+    if (!key?.trim()) {
+      throw new BadRequestException('Storage key is required');
+    }
+
+    if (!this.s3) {
+      throw new ServiceUnavailableException(
+        'Object storage is not configured on the server',
+      );
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    });
+
+    return getSignedUrl(this.s3, command, { expiresIn });
+  }
+
+  guessMimeTypeFromKey(key: string): string {
+    const extension = key.split('.').pop()?.toLowerCase() ?? 'jpg';
+    return EXTENSION_TO_MIME[extension] ?? 'image/jpeg';
   }
 
   async uploadPaymentScreenshot(
@@ -108,9 +146,12 @@ export class StorageService {
       }),
     );
 
+    const file_url = await this.getSignedUrl(key);
+
     return {
-      file_url: `${this.endpoint}/${this.bucket}/${key}`,
+      file_url,
       mime_type: file.mimetype,
+      key,
     };
   }
 }

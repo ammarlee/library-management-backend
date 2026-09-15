@@ -92,7 +92,9 @@ export class ReservationsService {
     const totalAmount = multiplyDecimal(reservationPrice, dto.quantity);
 
     if (deposit.gt(totalAmount)) {
-      throw new BadRequestException('Deposit cannot exceed reservation total');
+      throw new BadRequestException(
+        'Deposit cannot exceed product/reservation price',
+      );
     }
 
     const reservationId = await this.prisma.$transaction(

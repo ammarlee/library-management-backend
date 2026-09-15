@@ -48,24 +48,40 @@ export class InventoryService {
   ) {
     this.assertBranchAccess(user, branchId);
 
+    const productInclude = {
+      teacher: true,
+      studyYear: true,
+      academicYear: true,
+    } as const;
+
     const inventories = await this.prisma.inventory.findMany({
       where: { branchId },
       include: {
         branch: true,
-        product: {
-          include: {
-            teacher: true,
-            studyYear: true,
-            academicYear: true,
-          },
-        },
+        product: { include: productInclude },
       },
     });
 
-    return this.applyInventoryFilters(
-      inventories.map((item) => this.withAvailableQuantity(item)),
-      query,
-    );
+    let items: Array<{
+      availableQuantity: number;
+      productId?: string;
+      product?: {
+        id?: string;
+        status?: ProductStatus | string;
+        reservationAllowed?: boolean;
+      } | null;
+      [key: string]: unknown;
+    }> = inventories.map((item) => this.withAvailableQuantity(item));
+
+    if (query.forReservation) {
+      items = await this.mergeReservableProductsWithoutStock(
+        branchId,
+        items,
+        productInclude,
+      );
+    }
+
+    return this.applyInventoryFilters(items, query);
   }
 
   async findOne(branchId: string, productId: string, user: AuthenticatedUser) {
@@ -182,18 +198,85 @@ export class InventoryService {
   private applyInventoryFilters<
     T extends {
       availableQuantity: number;
-      product?: { status?: ProductStatus | string } | null;
+      product?: {
+        status?: ProductStatus | string;
+        reservationAllowed?: boolean;
+      } | null;
     },
   >(items: T[], query: InventoryQueryDto) {
-    if (!query.availableOnly) {
-      return items;
+    if (query.forReservation) {
+      return items.filter(
+        (item) =>
+          item.product?.reservationAllowed === true &&
+          item.product?.status !== ProductStatus.INACTIVE,
+      );
     }
 
-    return items.filter(
-      (item) =>
-        item.availableQuantity > 0 &&
-        item.product?.status !== ProductStatus.INACTIVE,
+    if (query.availableOnly) {
+      return items.filter(
+        (item) =>
+          item.availableQuantity > 0 &&
+          item.product?.status !== ProductStatus.INACTIVE,
+      );
+    }
+
+    return items;
+  }
+
+  /**
+   * Reservable products may not have an inventory row yet (WAITING_FOR_STOCK).
+   * Include them with availableQuantity = 0 for the booking UI.
+   */
+  private async mergeReservableProductsWithoutStock(
+    branchId: string,
+    items: Array<{
+      productId?: string;
+      product?: { id?: string } | null;
+      availableQuantity: number;
+      [key: string]: unknown;
+    }>,
+    productInclude: {
+      teacher: true;
+      studyYear: true;
+      academicYear: true;
+    },
+  ) {
+    const existingProductIds = new Set(
+      items
+        .map((item) => item.productId || item.product?.id)
+        .filter((id): id is string => Boolean(id)),
     );
+
+    const missingProducts = await this.prisma.product.findMany({
+      where: {
+        reservationAllowed: true,
+        status: { not: ProductStatus.INACTIVE },
+        ...(existingProductIds.size
+          ? { id: { notIn: [...existingProductIds] } }
+          : {}),
+      },
+      include: productInclude,
+    });
+
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+    });
+
+    const placeholders = missingProducts.map((product) => ({
+      id: null,
+      branchId,
+      productId: product.id,
+      physicalQuantity: 0,
+      reservedQuantity: 0,
+      lowStockThreshold: 0,
+      availableQuantity: 0,
+      branch,
+      product,
+      createdAt: null,
+      updatedAt: null,
+    }));
+
+    return [...items, ...placeholders];
   }
 
   private assertBranchAccess(user: AuthenticatedUser, branchId: string) {
