@@ -79,7 +79,7 @@ export class SalesService {
       throw new BadRequestException('Branch is inactive');
     }
 
-    if (!product || product.status !== ProductStatus.ACTIVE) {
+    if (!product || product.status === ProductStatus.INACTIVE) {
       throw new BadRequestException('Product not found or inactive');
     }
 

@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -15,6 +16,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { InventoryQueryDto } from './dto/inventory-query.dto';
 import { StockQuantityDto } from './dto/stock-quantity.dto';
 import { InventoryService } from './inventory.service';
 
@@ -27,8 +29,11 @@ export class InventoryController {
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.CUSTOMER_SERVICE, UserRole.BRANCH_EMPLOYEE)
-  findAll(@CurrentUser() user: AuthenticatedUser) {
-    return this.inventoryService.findAll(user);
+  findAll(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: InventoryQueryDto,
+  ) {
+    return this.inventoryService.findAll(user, query);
   }
 
   @Get(':branchId')
@@ -36,8 +41,9 @@ export class InventoryController {
   findByBranch(
     @Param('branchId', ParseUUIDPipe) branchId: string,
     @CurrentUser() user: AuthenticatedUser,
+    @Query() query: InventoryQueryDto,
   ) {
-    return this.inventoryService.findByBranch(branchId, user);
+    return this.inventoryService.findByBranch(branchId, user, query);
   }
 
   @Get(':branchId/:productId')

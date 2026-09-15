@@ -27,6 +27,11 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGIN?: string;
+
+  /** Neon direct (non-pooler) URL — required for reliable interactive transactions */
+  @IsString()
+  @IsOptional()
+  DATABASE_URL_UNPOOLED?: string;
 }
 
 export function validateEnv(config: Record<string, unknown>) {

@@ -53,9 +53,10 @@ export class InventoryOperationsService {
   ) {
     await this.ensureInventory(tx, branchId, productId);
 
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM "Inventory"
-      WHERE "branchId" = ${branchId} AND "productId" = ${productId}
+    const rows = await tx.$queryRaw<Array<Inventory>>`
+      SELECT *
+      FROM "Inventory"
+      WHERE "branchId" = ${branchId}::uuid AND "productId" = ${productId}::uuid
       FOR UPDATE
     `;
 
@@ -63,9 +64,7 @@ export class InventoryOperationsService {
       throw new BadRequestException('Inventory record not found');
     }
 
-    return tx.inventory.findUniqueOrThrow({
-      where: { branchId_productId: { branchId, productId } },
-    });
+    return rows[0];
   }
 
   async createMovement(tx: TransactionClient, input: StockMovementInput) {
