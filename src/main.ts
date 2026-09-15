@@ -29,6 +29,7 @@ async function bootstrap() {
       'Accept',
       'Origin',
       'X-Requested-With',
+      'X-Report-Section',
     ],
     exposedHeaders: ['Authorization'],
     preflightContinue: false,

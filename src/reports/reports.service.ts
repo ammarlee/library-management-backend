@@ -4,6 +4,16 @@ import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportQueryDto } from './dto/report-query.dto';
 
+export type DailyReportSection =
+  | 'summary'
+  | 'sales'
+  | 'reservations'
+  | 'delivered'
+  | 'cancelled'
+  | 'received'
+  | 'stockout'
+  | 'allmovements';
+
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -28,107 +38,217 @@ export class ReportsService {
     return Number.isFinite(n) ? n : 0;
   }
 
-  async getDailyReport(user: AuthenticatedUser, query: ReportQueryDto) {
+  async getDailyReport(
+    user: AuthenticatedUser,
+    query: ReportQueryDto,
+    section: DailyReportSection = 'summary',
+  ) {
     const range = this.buildDateRange(query);
 
     if (user.role === UserRole.ADMIN) {
-      const branchFilter = query.branchId ? { branchId: query.branchId } : {};
-
-      const [sales, reservations, deliveredReservations, returns, exchanges, payments] =
-        await Promise.all([
-          this.prisma.sale.count({
-            where: { ...branchFilter, createdAt: range },
-          }),
-          this.prisma.reservation.count({
-            where: { ...branchFilter, createdAt: range },
-          }),
-          this.prisma.reservation.count({
-            where: {
-              ...branchFilter,
-              status: ReservationStatus.DELIVERED,
-              updatedAt: range,
-            },
-          }),
-          this.prisma.productReturn.count({ where: { createdAt: range } }),
-          this.prisma.exchange.count({ where: { createdAt: range } }),
-          this.prisma.payment.aggregate({
-            where: { createdAt: range, ...(query.branchId ? { sale: { branchId: query.branchId } } : {}) },
-            _sum: { amount: true },
-          }),
-        ]);
-
-      return {
-        sales,
-        reservations,
-        deliveredReservations,
-        returns,
-        exchanges,
-        paymentsTotal: payments._sum.amount,
-      };
+      return this.getAdminDailySummary(query, range);
     }
 
     if (user.role === UserRole.CUSTOMER_SERVICE) {
       const reservations = await this.prisma.reservation.count({
         where: { createdById: user.id, createdAt: range },
       });
-
-      return { reservations };
+      return { summary: { reservations }, section: 'summary' };
     }
 
     if (user.role === UserRole.BRANCH_EMPLOYEE && user.branchId) {
-      const branchId = user.branchId;
-      const dateRange = this.buildDateRange(query);
+      if (section === 'summary') {
+        return this.getBranchDailySummary(user.branchId, range);
+      }
+      return this.getBranchDailySection(user.branchId, range, section);
+    }
 
-      const [
+    throw new ForbiddenException('Cannot generate report');
+  }
+
+  private async getAdminDailySummary(
+    query: ReportQueryDto,
+    range: { gte: Date; lte: Date },
+  ) {
+    const branchFilter = query.branchId ? { branchId: query.branchId } : {};
+
+    const [sales, reservations, deliveredReservations, returns, exchanges, payments] =
+      await Promise.all([
+        this.prisma.sale.count({
+          where: { ...branchFilter, createdAt: range },
+        }),
+        this.prisma.reservation.count({
+          where: { ...branchFilter, createdAt: range },
+        }),
+        this.prisma.reservation.count({
+          where: {
+            ...branchFilter,
+            status: ReservationStatus.DELIVERED,
+            updatedAt: range,
+          },
+        }),
+        this.prisma.productReturn.count({ where: { createdAt: range } }),
+        this.prisma.exchange.count({ where: { createdAt: range } }),
+        this.prisma.payment.aggregate({
+          where: {
+            createdAt: range,
+            ...(query.branchId ? { sale: { branchId: query.branchId } } : {}),
+          },
+          _sum: { amount: true },
+        }),
+      ]);
+
+    return {
+      section: 'summary' as const,
+      summary: {
+        sales,
+        reservations,
+        deliveredReservations,
+        returns,
+        exchanges,
+        paymentsTotal: this.moneyNumber(payments._sum.amount),
+      },
+    };
+  }
+
+  private async getBranchDailySummary(
+    branchId: string,
+    dateRange: { gte: Date; lte: Date },
+  ) {
+    const [
+      sales,
+      reservations,
+      deliveredReservations,
+      cancelledReservations,
+      returns,
+      exchanges,
+      stockMovementsCount,
+      movementQtyRows,
+      paymentsList,
+      refundsList,
+    ] = await Promise.all([
+      this.prisma.sale.count({
+        where: { branchId, createdAt: dateRange },
+      }),
+      this.prisma.reservation.count({
+        where: { branchId, createdAt: dateRange },
+      }),
+      this.prisma.reservation.count({
+        where: {
+          branchId,
+          status: ReservationStatus.DELIVERED,
+          updatedAt: dateRange,
+        },
+      }),
+      this.prisma.reservation.count({
+        where: {
+          branchId,
+          status: ReservationStatus.CANCELLED,
+          updatedAt: dateRange,
+        },
+      }),
+      this.prisma.productReturn.count({
+        where: { sale: { branchId }, createdAt: dateRange },
+      }),
+      this.prisma.exchange.count({
+        where: { sale: { branchId }, createdAt: dateRange },
+      }),
+      this.prisma.stockMovement.count({
+        where: { branchId, createdAt: dateRange },
+      }),
+      this.prisma.stockMovement.findMany({
+        where: { branchId, createdAt: dateRange },
+        select: { movementType: true, physicalQuantityChange: true },
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          createdAt: dateRange,
+          OR: [{ sale: { branchId } }, { reservation: { branchId } }],
+        },
+        select: { amount: true },
+      }),
+      this.prisma.refund.findMany({
+        where: {
+          createdAt: dateRange,
+          OR: [
+            { sale: { branchId } },
+            { reservation: { branchId } },
+            { returnRecord: { sale: { branchId } } },
+            { exchange: { sale: { branchId } } },
+          ],
+        },
+        select: { amount: true },
+      }),
+    ]);
+
+    let receivedQty = 0;
+    let stockOutQty = 0;
+
+    for (const m of movementQtyRows) {
+      if (
+        m.movementType === StockMovementType.STOCK_IN ||
+        m.movementType === StockMovementType.RETURN ||
+        (m.physicalQuantityChange > 0 &&
+          m.movementType !== StockMovementType.ADJUSTMENT &&
+          m.movementType !== StockMovementType.RESERVATION &&
+          m.movementType !== StockMovementType.RESERVATION_RELEASE)
+      ) {
+        receivedQty += Math.max(0, m.physicalQuantityChange);
+      }
+
+      if (
+        m.movementType === StockMovementType.STOCK_OUT ||
+        m.movementType === StockMovementType.DAMAGED
+      ) {
+        stockOutQty += Math.abs(m.physicalQuantityChange);
+      }
+    }
+
+    const paymentsCollected = paymentsList.reduce(
+      (sum, row) => sum + this.moneyNumber(row.amount),
+      0,
+    );
+    const refundsTotal = refundsList.reduce(
+      (sum, row) => sum + this.moneyNumber(row.amount),
+      0,
+    );
+    const paymentsNet = Number((paymentsCollected - refundsTotal).toFixed(2));
+
+    return {
+      section: 'summary' as const,
+      branchId,
+      from: dateRange.gte,
+      to: dateRange.lte,
+      summary: {
         sales,
         reservations,
         deliveredReservations,
         cancelledReservations,
         returns,
         exchanges,
-        stockMovements,
-        salesList,
-        reservationsList,
-        deliveredList,
-        cancelledList,
-        refundsList,
-        paymentsList,
-      ] = await Promise.all([
-        this.prisma.sale.count({
-          where: { branchId, createdAt: dateRange },
-        }),
-        this.prisma.reservation.count({
-          where: { branchId, createdAt: dateRange },
-        }),
-        this.prisma.reservation.count({
-          where: {
-            branchId,
-            status: ReservationStatus.DELIVERED,
-            updatedAt: dateRange,
-          },
-        }),
-        this.prisma.reservation.count({
-          where: {
-            branchId,
-            status: ReservationStatus.CANCELLED,
-            updatedAt: dateRange,
-          },
-        }),
-        this.prisma.productReturn.count({
-          where: { sale: { branchId }, createdAt: dateRange },
-        }),
-        this.prisma.exchange.count({
-          where: { sale: { branchId }, createdAt: dateRange },
-        }),
-        this.prisma.stockMovement.findMany({
-          where: { branchId, createdAt: dateRange },
-          include: {
-            product: { select: { id: true, name: true, type: true } },
-            createdBy: { select: { id: true, fullName: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-        }),
-        this.prisma.sale.findMany({
+        paymentsCollected: Number(paymentsCollected.toFixed(2)),
+        refundsTotal: Number(refundsTotal.toFixed(2)),
+        paymentsTotal: paymentsNet,
+        receivedQty,
+        stockOutQty,
+        stockMovements: stockMovementsCount,
+      },
+    };
+  }
+
+  private async getBranchDailySection(
+    branchId: string,
+    dateRange: { gte: Date; lte: Date },
+    section: Exclude<DailyReportSection, 'summary'>,
+  ) {
+    const movementInclude = {
+      product: { select: { id: true, name: true, type: true } },
+      createdBy: { select: { id: true, fullName: true } },
+    } as const;
+
+    switch (section) {
+      case 'sales': {
+        const sales = await this.prisma.sale.findMany({
           where: { branchId, createdAt: dateRange },
           include: {
             student: { select: { id: true, name: true, phone: true } },
@@ -141,8 +261,12 @@ export class ReportsService {
             createdBy: { select: { id: true, fullName: true } },
           },
           orderBy: { createdAt: 'desc' },
-        }),
-        this.prisma.reservation.findMany({
+        });
+        return { section, sales };
+      }
+
+      case 'reservations': {
+        const reservations = await this.prisma.reservation.findMany({
           where: { branchId, createdAt: dateRange },
           include: {
             student: { select: { id: true, name: true, phone: true } },
@@ -152,8 +276,12 @@ export class ReportsService {
             refunds: true,
           },
           orderBy: { createdAt: 'desc' },
-        }),
-        this.prisma.reservation.findMany({
+        });
+        return { section, reservations };
+      }
+
+      case 'delivered': {
+        const deliveredReservations = await this.prisma.reservation.findMany({
           where: {
             branchId,
             status: ReservationStatus.DELIVERED,
@@ -165,8 +293,12 @@ export class ReportsService {
             createdBy: { select: { id: true, fullName: true } },
           },
           orderBy: { updatedAt: 'desc' },
-        }),
-        this.prisma.reservation.findMany({
+        });
+        return { section, deliveredReservations };
+      }
+
+      case 'cancelled': {
+        const cancelledReservations = await this.prisma.reservation.findMany({
           where: {
             branchId,
             status: ReservationStatus.CANCELLED,
@@ -180,112 +312,55 @@ export class ReportsService {
             refunds: true,
           },
           orderBy: { updatedAt: 'desc' },
-        }),
-        this.prisma.refund.findMany({
-          where: {
-            createdAt: dateRange,
-            OR: [
-              { sale: { branchId } },
-              { reservation: { branchId } },
-              { returnRecord: { sale: { branchId } } },
-              { exchange: { sale: { branchId } } },
-            ],
-          },
-          include: {
-            reservation: {
-              select: {
-                id: true,
-                reservationNumber: true,
-                student: { select: { name: true } },
-                product: { select: { name: true } },
-              },
-            },
-            sale: {
-              select: {
-                id: true,
-                student: { select: { name: true } },
-              },
-            },
-            createdBy: { select: { id: true, fullName: true } },
-          },
+        });
+        return { section, cancelledReservations };
+      }
+
+      case 'received': {
+        const stockMovements = await this.prisma.stockMovement.findMany({
+          where: { branchId, createdAt: dateRange },
+          include: movementInclude,
           orderBy: { createdAt: 'desc' },
-        }),
-        this.prisma.payment.findMany({
+        });
+        const receivedProducts = stockMovements.filter(
+          (m) =>
+            m.movementType === StockMovementType.STOCK_IN ||
+            m.movementType === StockMovementType.RETURN ||
+            (m.physicalQuantityChange > 0 &&
+              m.movementType !== StockMovementType.ADJUSTMENT &&
+              m.movementType !== StockMovementType.RESERVATION &&
+              m.movementType !== StockMovementType.RESERVATION_RELEASE),
+        );
+        return { section, receivedProducts };
+      }
+
+      case 'stockout': {
+        const stockMovements = await this.prisma.stockMovement.findMany({
           where: {
+            branchId,
             createdAt: dateRange,
-            OR: [{ sale: { branchId } }, { reservation: { branchId } }],
+            movementType: {
+              in: [StockMovementType.STOCK_OUT, StockMovementType.DAMAGED],
+            },
           },
-          select: { id: true, amount: true },
-        }),
-      ]);
+          include: movementInclude,
+          orderBy: { createdAt: 'desc' },
+        });
+        return { section, stockOutProducts: stockMovements };
+      }
 
-      const receivedStock = stockMovements.filter(
-        (m) =>
-          m.movementType === StockMovementType.STOCK_IN ||
-          m.movementType === StockMovementType.RETURN ||
-          (m.physicalQuantityChange > 0 &&
-            m.movementType !== StockMovementType.ADJUSTMENT &&
-            m.movementType !== StockMovementType.RESERVATION &&
-            m.movementType !== StockMovementType.RESERVATION_RELEASE),
-      );
-      const stockOutProducts = stockMovements.filter(
-        (m) =>
-          m.movementType === StockMovementType.STOCK_OUT ||
-          m.movementType === StockMovementType.DAMAGED,
-      );
+      case 'allmovements': {
+        const stockMovements = await this.prisma.stockMovement.findMany({
+          where: { branchId, createdAt: dateRange },
+          include: movementInclude,
+          orderBy: { createdAt: 'desc' },
+        });
+        return { section, stockMovements };
+      }
 
-      const receivedQty = receivedStock.reduce(
-        (sum, m) => sum + Math.max(0, m.physicalQuantityChange),
-        0,
-      );
-      const stockOutQty = stockOutProducts.reduce(
-        (sum, m) => sum + Math.abs(m.physicalQuantityChange),
-        0,
-      );
-
-      // paymentsTotal = money collected today − refunds issued today
-      // (cancel reservation creates a Refund for the deposit → net drops)
-      const paymentsCollected = paymentsList.reduce(
-        (sum, row) => sum + this.moneyNumber(row.amount),
-        0,
-      );
-      const refundsTotal = refundsList.reduce(
-        (sum, row) => sum + this.moneyNumber(row.amount),
-        0,
-      );
-      const paymentsNet = Number((paymentsCollected - refundsTotal).toFixed(2));
-
-      return {
-        branchId,
-        from: dateRange.gte,
-        to: dateRange.lte,
-        summary: {
-          sales,
-          reservations,
-          deliveredReservations,
-          cancelledReservations,
-          returns,
-          exchanges,
-          paymentsCollected: Number(paymentsCollected.toFixed(2)),
-          refundsTotal: Number(refundsTotal.toFixed(2)),
-          /** Net cash after refunds */
-          paymentsTotal: paymentsNet,
-          receivedQty,
-          stockOutQty,
-          stockMovements: stockMovements.length,
-        },
-        sales: salesList,
-        reservations: reservationsList,
-        deliveredReservations: deliveredList,
-        cancelledReservations: cancelledList,
-        refunds: refundsList,
-        receivedProducts: receivedStock,
-        stockOutProducts,
-        stockMovements,
-      };
+      default:
+        throw new ForbiddenException('Invalid report section');
     }
-
-    throw new ForbiddenException('Cannot generate report');
   }
 
   getSalesReport(user: AuthenticatedUser, query: ReportQueryDto) {
@@ -387,8 +462,12 @@ export class ReportsService {
     query: ReportQueryDto,
     field: 'createdAt' | 'expenseDate' = 'createdAt',
   ) {
-    const from = query.from ? new Date(query.from) : new Date(new Date().setHours(0, 0, 0, 0));
-    const to = query.to ? new Date(query.to) : new Date(new Date().setHours(23, 59, 59, 999));
+    const from = query.from
+      ? new Date(query.from)
+      : new Date(new Date().setHours(0, 0, 0, 0));
+    const to = query.to
+      ? new Date(query.to)
+      : new Date(new Date().setHours(23, 59, 59, 999));
 
     return { gte: from, lte: to };
   }
